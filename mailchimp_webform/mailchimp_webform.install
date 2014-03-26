@@ -1,0 +1,40 @@
+<?php
+
+/**
+ * Database table containing MailChimp webform properties
+ */
+function mailchimp_webform_schema() 
+{
+    $schema['mailchimp_webform'] = array(
+        'description' => 'Webform properties for MailChimp integration',
+        'fields' => array(
+            'nid' => array(
+                'type' => 'int',
+                'description' => 'Webform properities belong to'
+            ),
+            'mailchimp_list' => array(
+                'type' => 'varchar',
+                'length' => 32,
+                'description' => 'MailChimp list to subscribe to'
+            ),
+            'email_field' => array(
+                'type' => 'varchar',
+                'length' => 128,
+                'description' => 'Webform component containing the email address'
+            ),
+            'opt_in_field' => array(
+                'type' => 'varchar',
+                'length' => 128,
+                'description' => 'Webform component containing the opt-in field'
+            ),
+            'merge_vars' => array(
+                'type' => 'text',
+                'description' => 'Serialized array of merge variables and associated webform components'
+            )
+        ),
+        'primary key' => array('nid'),
+    );
+    return $schema;
+}
+
+?>

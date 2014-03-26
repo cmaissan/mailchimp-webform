@@ -1,0 +1,181 @@
+<?php
+
+/**
+ * Hook into "form_alter"
+ */
+function mailchimp_webform_form_alter(&$form, &$form_state, $form_id) 
+{
+	// Add MailChimp options to form settings
+	if (strpos($form_id, 'webform_configure_form') !== FALSE) {
+		$form['mailchimp'] = array(
+			'#type' => 'fieldset',
+			'#title' => 'MailChimp',
+			'#collapsible' => TRUE,
+			'#collapsed' => TRUE,
+			'mailchimp_list' => array(
+				'#type' => 'select',
+				'#title' => 'MailChimp list',
+				'#options' => _mailchimp_webform_lists(),
+				'#default_value' => isset($form['#node']->mailchimp_webform) ? $form['#node']->mailchimp_webform['mailchimp_list'] : 0,
+				'#ajax' => array(
+					'callback' => 'mailchimp_webform_merge_variables',
+					'wrapper' => 'mailchimp-merge-variables',
+					'method' => 'replace'
+				)
+			),
+			'email_field' => array(
+				'#type' => 'select',
+				'#title' => 'Email field',
+				'#options' => _mailchimp_webform_components($form['#node']->webform),
+				'#default_value' => isset($form['#node']->mailchimp_webform) ? $form['#node']->mailchimp_webform['email_field'] : 0
+			),
+			'opt_in_field' => array(
+				'#type' => 'select',
+				'#title' => 'Opt-in field',
+				'#options' => _mailchimp_webform_components($form['#node']->webform),
+				'#default_value' => isset($form['#node']->mailchimp_webform) ? $form['#node']->mailchimp_webform['opt_in_field'] : 0
+			),
+			'merge_vars' => array(
+				'#type' => 'fieldset',
+				'#title' => 'Merge variables',
+				'#prefix' => '<div id="mailchimp-merge-variables">',
+				'#suffix' => '</div>',
+				'#collapsible' => TRUE,
+				'merge_vars' => array(
+					'#tree' => TRUE
+				)
+			)
+		);
+		$form['#submit'][] = 'mailchimp_webform_configure_form_submit';
+
+		// Get merge variables for list
+		$list_id = isset($form['#node']->mailchimp_webform) ? $form['#node']->mailchimp_webform['mailchimp_list'] : '';
+		if (!empty($form_state['values']['mailchimp_list'])) $list_id = $form_state['values']['mailchimp_list'];
+		if ($mcapi = mailchimp_get_api_object()) {
+
+			// Add select boxs for each merge variable
+			if ($vars = $mcapi->listMergeVars($list_id)) {
+				foreach ($vars as $var) {
+					if ($var['tag'] != 'EMAIL') {
+						$form['mailchimp']['merge_vars']['merge_vars'][$var['tag']] = array(
+							'#type' => 'select',
+							'#title' => $var['name'],
+							'#options' => _mailchimp_webform_components($form['#node']->webform),
+							'#default_value' => isset($form['#node']->mailchimp_webform['merge_vars'][$var['tag']]) ? $form['#node']->mailchimp_webform['merge_vars'][$var['tag']] : 0
+						);
+					}
+				}
+			}
+		}
+	}
+
+	// Add submit handler to webforms
+	if (strpos($form_id, 'webform_client_form_') !== FALSE) {
+		$form['#submit'][] = 'mailchimp_webform_client_form_submit';
+	}
+}
+
+
+/**
+ * Update merge fields when list selected
+ */
+function mailchimp_webform_merge_variables($form, &$form_state)
+{
+	return $form['mailchimp']['merge_vars'];
+}
+
+/**
+ * Save MailChimp settings
+ */
+function mailchimp_webform_configure_form_submit($form, &$form_state)
+{
+	db_merge('mailchimp_webform')
+		->key(array('nid' => $form['#node']->nid))
+		->fields(array(
+			'nid' => $form['#node']->nid,
+			'mailchimp_list' => $form_state['values']['mailchimp_list'],
+			'email_field' => $form_state['values']['email_field'],
+			'opt_in_field' => $form_state['values']['opt_in_field'],
+			'merge_vars' => serialize($form_state['values']['merge_vars'])
+		))
+		->execute();
+}
+
+/**
+ * Load MailChimp settings
+ */
+function mailchimp_node_load($nodes, $types)
+{
+	// If webform load additional properties
+	if (in_array('webform', $types)) {
+		$result = db_query(
+			'SELECT * FROM {mailchimp_webform} WHERE nid IN(:nids)', 
+			array(':nids' => array_keys($nodes))
+		);
+		foreach ($result as $record) {
+			$nodes[$record->nid]->mailchimp_webform['mailchimp_list'] = $record->mailchimp_list;
+			$nodes[$record->nid]->mailchimp_webform['email_field'] = $record->email_field;
+			$nodes[$record->nid]->mailchimp_webform['opt_in_field'] = $record->opt_in_field;
+			$nodes[$record->nid]->mailchimp_webform['merge_vars'] = unserialize($record->merge_vars);
+		}
+	}
+}
+
+/**
+ * Subscribe email to list on submit
+ */
+function mailchimp_webform_client_form_submit($form, &$form_state)
+{
+	// Check if form associated with MailChimp list
+	if (!empty($form['#node']->mailchimp_webform['mailchimp_list'])) {
+
+		// Check for opt-in
+		$opt_in = $form_state['values']['submitted_tree'][$form['#node']->mailchimp_webform['opt_in_field']];
+		if (empty($opt_in)) return;
+
+		// Get list ID
+		$list_id = $form['#node']->mailchimp_webform['mailchimp_list'];
+
+		// Get any merge variables
+		$merge_vars = array();
+		foreach ($form['#node']->mailchimp_webform['merge_vars'] as $key => $field) {
+			if (!empty($field)) {
+				$merge_vars[$key] = $form_state['values']['submitted_tree'][$field];
+			}
+		}
+
+		// Subscribe email to list
+		$email = $form_state['values']['submitted_tree'][$form['#node']->mailchimp_webform['email_field']];
+		if (!empty($list_id) && !empty($email)) {
+			if ($mcapi = mailchimp_get_api_object()) {
+			    $mcapi->listSubscribe($list_id, $email, $merge_vars, 'html', TRUE, TRUE);
+			}
+		}
+	}
+}
+
+/**
+ * Return MailChimp lists
+ */
+function _mailchimp_webform_lists()
+{
+	$lists = array('0' => 'None');
+	foreach (mailchimp_get_lists() as $list) {
+		$lists[$list['id']] = $list['name'];
+	}
+	return $lists;
+}
+
+/**
+ * Return email components from webform
+ */
+function _mailchimp_webform_components($webform)
+{
+	$components = array('0' => 'None');
+	foreach ($webform['components'] as $component) {
+		$components[$component['form_key']] = $component['name'];
+	}
+	return $components;
+}
+
+?>
