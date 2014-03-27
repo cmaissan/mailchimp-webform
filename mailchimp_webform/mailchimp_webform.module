@@ -150,7 +150,9 @@ function mailchimp_webform_client_form_submit($form, &$form_state)
 		$email = $form_state['values']['submitted_tree'][$form['#node']->mailchimp_webform['email_field']];
 		if (!empty($list_id) && !empty($email)) {
 			if ($mcapi = mailchimp_get_api_object()) {
-			    $mcapi->listSubscribe($list_id, $email, $merge_vars, 'html', TRUE, TRUE);
+			    if (!$mcapi->listSubscribe($list_id, $email, $merge_vars, 'html', TRUE, TRUE)) {
+			    	drupal_set_message(t('An error occurred subscribing to the list.'), 'error');
+			    }
 			}
 		}
 	}
