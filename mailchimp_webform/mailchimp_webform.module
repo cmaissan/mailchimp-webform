@@ -130,8 +130,10 @@ function mailchimp_webform_client_form_submit($form, &$form_state)
 	if (!empty($form['#node']->mailchimp_webform['mailchimp_list'])) {
 
 		// Check for opt-in
-		$opt_in = $form_state['values']['submitted_tree'][$form['#node']->mailchimp_webform['opt_in_field']];
-		if (empty($opt_in)) return;
+		if (!empty($form['#node']->mailchimp_webform['opt_in_field'])) {
+			$opt_in = $form_state['values']['submitted_tree'][$form['#node']->mailchimp_webform['opt_in_field']];
+			if (empty($opt_in)) return;
+		}
 
 		// Get list ID
 		$list_id = $form['#node']->mailchimp_webform['mailchimp_list'];
